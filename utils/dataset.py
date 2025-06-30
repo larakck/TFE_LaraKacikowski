@@ -33,7 +33,9 @@ class ClientDataset(Dataset):
             base_transforms += [
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(20),
-                transforms.RandomResizedCrop((img_size, img_size), scale=(0.8, 1.0))
+                transforms.RandomResizedCrop((img_size, img_size), scale=(0.8, 1.0)),
+                transforms.ColorJitter(brightness=0.1, contrast=0.1),#amodif 
+                transforms.GaussianBlur(kernel_size=3)
             ]
 
         base_transforms += [

@@ -29,13 +29,14 @@ class DiceLoss(nn.Module):
 
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self,
-                 local_epochs=5,
-                 noise_multiplier=1.0,
-                 batch_size=8,
-                 max_grad_norm=0.8,
-                 lr=1e-3):
-
+    def __init__(
+        self,
+        local_epochs=5,
+        noise_multiplier=1.0,
+        batch_size=8,
+        max_grad_norm=0.8,
+        lr=1e-3
+    ):
         self.model = UNet().to(DEVICE)
 
         self.bce = nn.BCEWithLogitsLoss()
@@ -53,6 +54,7 @@ class FlowerClient(fl.client.NumPyClient):
             self.optimizer, mode='min', factor=0.5, patience=2, verbose=True
         )
 
+        # DP attributes
         self.privacy_engine = None
         self.dp_enabled = False
         self.noise_multiplier = noise_multiplier
@@ -69,11 +71,19 @@ class FlowerClient(fl.client.NumPyClient):
             p.data = torch.tensor(new, dtype=torch.float32).to(DEVICE)
 
     def fit(self, parameters, config):
+        # Récupération dynamique du noise_multiplier depuis le serveur
+        nm = config.get("noise_multiplier", self.noise_multiplier)
+        # Si le noise_multiplier a changé, réinitialiser la DP
+        if nm != self.noise_multiplier:
+            self.noise_multiplier = nm
+            self.dp_enabled = False
+
         self.set_parameters(parameters)
 
-        # Enable DP only once
+        # Activer DP si besoin
         if self.noise_multiplier > 0 and not self.dp_enabled:
-            self.model.train()  # Important for Opacus to insert hooks
+            self.model.train()  # Important pour Opacus
+            # (Ré)initialisation du PrivacyEngine avec le nouveau noise_multiplier
             self.privacy_engine = PrivacyEngine()
             self.model, self.optimizer, self.train_dl = self.privacy_engine.make_private(
                 module=self.model,
@@ -92,7 +102,7 @@ class FlowerClient(fl.client.NumPyClient):
 
         dice = evaluate(self.model, self.val_dl)
 
-        # ✅ Calcul correct d'ε sans redonner le sample_rate
+        # Calcul correct d'ε via l'accountant
         epsilon = (
             self.privacy_engine.accountant.get_epsilon(delta=1e-5)
             if self.privacy_engine else 0.0
@@ -115,9 +125,13 @@ class FlowerClient(fl.client.NumPyClient):
 if __name__ == "__main__":
     client = FlowerClient(
         local_epochs=2,
-        noise_multiplier=1.0,   # à ajuster dynamiquement selon l'expérience
+        noise_multiplier=1.0,   # Valeur par défaut
         batch_size=8,
         max_grad_norm=0.8,
         lr=1e-3,
     )
-    fl.client.start_client(server_address="localhost:8080", client=client.to_client())
+    try:
+        fl.client.start_client(server_address="localhost:8080", client=client.to_client())
+    except Exception as e:
+        print(f"[Client] Connection error: {e}")
+        sys.exit(1)

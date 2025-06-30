@@ -41,7 +41,7 @@ class SaveMetricsStrategy(fl.server.strategy.FedAvg):
 
 def main():
     # Liste des bruitages à tester
-    noise_multipliers = [1.0, 1.2, 1.5]
+    noise_multipliers = [1, 1.5, 1.8, 2.0, 2.2, 2.5, 3.0]
 
     all_losses = {}
     all_dices = {}
@@ -58,15 +58,15 @@ def main():
         strategy = SaveMetricsStrategy(
             noise_multiplier=nm,
             fraction_fit=1.0,
-            min_fit_clients=2,
-            min_available_clients=2,
+            min_fit_clients=3,
+            min_available_clients=3,
             on_fit_config_fn=send_config_fn,  # ← injection du noise
         )
 
         # Démarrer le serveur pour ce nm
         fl.server.start_server(
             server_address="localhost:8080",
-            config=fl.server.ServerConfig(num_rounds=5),
+            config=fl.server.ServerConfig(num_rounds=6),
             strategy=strategy,
         )
 
