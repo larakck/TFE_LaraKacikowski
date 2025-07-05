@@ -2,4 +2,9 @@
 
 
 d'abord avoir fait file 
-puis écision de passer à native flower pcq mieux pour bcp de clients 
+
+file less 
+
+2%dice => amélioration 
+
+dp et amélioration si possible 

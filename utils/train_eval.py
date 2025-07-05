@@ -46,3 +46,7 @@ def evaluate(model, dataloader):
             pred = torch.sigmoid(model(x))
             total_dice += dice_score(pred, y)
     return total_dice / len(dataloader)
+
+def set_model_parameters(model: torch.nn.Module, parameters: list[torch.Tensor]) -> None:
+    for param, new_param in zip(model.parameters(), parameters):
+        param.data = new_param.data.clone()

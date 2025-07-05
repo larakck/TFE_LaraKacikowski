@@ -8,10 +8,10 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
-from he.utils.model import UNet
-from he.utils.dataset import get_dataloaders
-from he.utils.train_eval import train, evaluate
-from he.utils.encryption_utils import (
+from he_filebased.utils.model import UNet
+from he_filebased.utils.dataset import get_dataloaders
+from he_filebased.utils.train_eval import train, evaluate
+from he_filebased.utils.encryption_utils import (
     create_ckks_context,
     encrypt_model_parameters,
     decrypt_model_parameters,
@@ -48,7 +48,7 @@ class FlowerClient(fl.client.NumPyClient):
             with open(fname, "rb") as f:
                 data = f.read()
             chunks = []
-            i = 0
+            i = 0a
             while i < len(data):
                 length = int.from_bytes(data[i : i + 4], "big"); i += 4
                 chunks.append(data[i : i + length]); i += length

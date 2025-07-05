@@ -4,7 +4,7 @@ import torch, torch.nn as nn, torch.optim as optim
 from utils.model import UNet
 from utils.dataset import get_dataloaders
 from utils.train_eval import train, evaluate
-from he.utils.encryption_utils import create_ckks_context, encrypt_model_parameters, decrypt_model_parameters
+from he_filebased.utils.encryption_utils import create_ckks_context, encrypt_model_parameters, decrypt_model_parameters
 import argparse, os, sys
 
 try:

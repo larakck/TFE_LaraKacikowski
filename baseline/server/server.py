@@ -5,8 +5,8 @@ import os
 from flwr.common import parameters_to_ndarrays
 
 # Créer un dossier pour sauvegarder les poids et les graphiques
-os.makedirs("weights", exist_ok=True)
-os.makedirs("plots", exist_ok=True)
+os.makedirs("baseline/weights", exist_ok=True)
+os.makedirs("baseline/plots", exist_ok=True)
 
 class SaveMetricsStrategy(fl.server.strategy.FedAvg):
     def __init__(self, noise_multiplier, *args, **kwargs):
@@ -21,7 +21,7 @@ class SaveMetricsStrategy(fl.server.strategy.FedAvg):
         if aggregated_parameters is not None:
             weights = parameters_to_ndarrays(aggregated_parameters)
             weights_torch = [torch.tensor(w) for w in weights]
-            torch.save(weights_torch, f"weights/nm_{self.noise_multiplier}_round_{server_round}.pth")
+            torch.save(weights_torch, f"baseline/weights/nm_{self.noise_multiplier}_round_{server_round}.pth")
 
         if results:
             losses = [fit_res.metrics["loss"] for _, fit_res in results if fit_res.metrics and "loss" in fit_res.metrics]
@@ -34,7 +34,7 @@ class SaveMetricsStrategy(fl.server.strategy.FedAvg):
         return aggregated_parameters, metrics_aggregated
 
 # === Début du script principal ===
-noise_multipliers = [0.0, 0.5, 1.0, 1.5]
+noise_multipliers = [0.0]
 all_losses = {}
 all_dices = {}
 
@@ -43,8 +43,8 @@ for nm in noise_multipliers:
 
     strategy = SaveMetricsStrategy(
         fraction_fit=1.0,
-        min_fit_clients=3,
-        min_available_clients=3,
+        min_fit_clients=1,
+        min_available_clients=1,
         noise_multiplier=nm,
     )
 
@@ -52,7 +52,7 @@ for nm in noise_multipliers:
 
     history = fl.server.start_server(
         server_address="localhost:8080",
-        config=fl.server.ServerConfig(num_rounds=7),
+        config=fl.server.ServerConfig(num_rounds=5),
         strategy=strategy,
     )
 
@@ -70,8 +70,7 @@ plt.ylabel("Loss")
 plt.title("Loss vs Rounds")
 plt.legend()
 plt.grid()
-plt.savefig("plots/loss_vs_rounds.png")
-plt.show()  # <= Affiche la figure
+plt.savefig("baseline/plots/loss_vs_rounds.png")
 
 # Dice vs Rounds
 plt.figure()
@@ -82,18 +81,7 @@ plt.ylabel("Dice Score")
 plt.title("Dice Score vs Rounds")
 plt.legend()
 plt.grid()
-plt.savefig("plots/dice_vs_rounds.png")
-plt.show()  # <= Affiche la figure
+plt.savefig("baseline/plots/dice_vs_rounds.png")
 
-# Dice Final vs Noise Multiplier
-final_dices = [all_dices[nm][-1] for nm in noise_multipliers]
-plt.figure()
-plt.plot(noise_multipliers, final_dices, marker='o')
-plt.xlabel("Noise Multiplier")
-plt.ylabel("Final Dice Score")
-plt.title("Final Dice Score vs Noise Multiplier")
-plt.grid()
-plt.savefig("plots/final_dice_vs_noise.png")
-plt.show()  # <= Affiche la figure
 
 print("\n✅ Tous les tests terminés et graphiques enregistrés ET affichés ! 🚀")
