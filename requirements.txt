@@ -1,0 +1,26 @@
+# Framework FL
+flwr==1.0.0                      # Flower federated learning
+
+# Deep learning
+torch>=1.11.0                    # ou la version GPU appropriée torch==1.11.0+cu117
+torchvision>=0.12.0
+
+# Homomorphic Encryption
+tenseal>=0.3.0                   # TenSEAL CKKS
+
+# Crypto / Privacy
+# (opacus est optionnel, que si tu veux DP)
+opacus>=1.4.0
+
+# Data & utils
+numpy>=1.21.0
+scikit-learn>=1.0.0
+pillow>=8.0.0
+matplotlib>=3.4.0
+
+# Flower common types
+protobuf>=3.19.0
+
+# Pour Windows : installez aussi CMake/Ninja via chocolately ou manuel
+#   choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'  
+#   choco install ninja

@@ -1,6 +1,7 @@
-# he/client/client_3.py
 
-import os, sys
+# he/client/client_3.py
+import os
+import sys
 import flwr as fl
 import torch
 import torch.nn as nn
@@ -17,13 +18,9 @@ from he.utils.encryption_utils import (
 )
 
 sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..")))
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DiceLoss(nn.Module):
-    def __init__(self):
-        super(DiceLoss, self).__init__()
-
     def forward(self, preds, targets):
         preds = torch.sigmoid(preds).view(-1)
         targets = targets.view(-1)
@@ -33,50 +30,42 @@ class DiceLoss(nn.Module):
 
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self):
-        # 1) Modèle & train/eval setup
         self.model = UNet().to(DEVICE)
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
         self.criterion = DiceLoss()
         self.train_dl, self.val_dl = get_dataloaders(
             "multicenter/train/Dataset001_Algeria", augment=True
         )
-
-        # 2) Contexte CKKS
-        self.private_context = create_ckks_context()
-        self.public_context = self.private_context.copy()
-        self.public_context.make_context_public()
-
+        # Contexte CKKS
+        self.ckks_context = create_ckks_context()
         self.round = 0
 
     def fit(self, parameters, config):
-        # 0) Si round > 0, lire & déchiffrer le fichier agrégé
+        # Pour rounds >1, déchiffrement
         if self.round > 0:
             fname = f"weights/encrypted_agg_round{self.round}.bin"
-            print(f"[Client] Round {self.round+1}: lecture {fname}...")
-            # parser le fichier
+            print(f"[Client] Round {self.round+1}: reading {fname}...")
             with open(fname, "rb") as f:
                 data = f.read()
             chunks = []
             i = 0
             while i < len(data):
-                length = int.from_bytes(data[i:i+4], "big"); i += 4
+                length = int.from_bytes(data[i : i + 4], "big"); i += 4
                 chunks.append(data[i : i + length]); i += length
-            # déchiffrement
-            decrypted = decrypt_model_parameters(chunks, self.private_context)
+            decrypted = decrypt_model_parameters(chunks, self.ckks_context)
             for p, arr in zip(self.model.parameters(), decrypted):
                 p.data = torch.tensor(arr.reshape(p.shape), dtype=torch.float32)
-            print(f"[Client] Round {self.round+1}: poids appliqués")
+            print(f"[Client] Round {self.round+1}: parameters updated")
 
-        # 1) Entraînement local
+        # Entraînement local
         print(f"[Client] Round {self.round+1}: start training...")
         loss = train(self.model, self.train_dl, self.optimizer, self.criterion)
         dice = evaluate(self.model, self.val_dl)
         print(f"[Client] Round {self.round+1}: Loss={loss:.4f} | Dice={dice:.4f}")
 
-        # 2) Chiffrement des poids entraînés
+        # Chiffrement des poids
         weights_np = [p.detach().cpu().numpy() for p in self.model.parameters()]
-        encrypted = encrypt_model_parameters(weights_np, self.public_context)
-        # écrire dans un fichier
+        encrypted = encrypt_model_parameters(weights_np, self.ckks_context)
         out = f"weights/encrypted_client_round{self.round+1}.bin"
         with open(out, "wb") as f:
             for chunk in encrypted:
@@ -85,21 +74,19 @@ class FlowerClient(fl.client.NumPyClient):
         print(f"[Client] Round {self.round+1}: encrypted -> {out}")
 
         self.round += 1
-        # 3) Retour light : pas de gros parameters, juste métriques
         return [], len(self.train_dl.dataset), {"loss": float(loss), "dice": float(dice), "file": out}
 
     def evaluate(self, parameters, config):
-        # Pour l'éval, on applique la même logique que fit pour déchiffrement
         fname = f"weights/encrypted_agg_round{self.round}.bin"
-        print(f"[Client] Eval Round {self.round}: lecture {fname}...")
+        print(f"[Client] Eval Round {self.round}: reading {fname}...")
         with open(fname, "rb") as f:
             data = f.read()
         chunks = []
         i = 0
         while i < len(data):
-            length = int.from_bytes(data[i:i+4], "big"); i += 4
+            length = int.from_bytes(data[i : i + 4], "big"); i += 4
             chunks.append(data[i : i + length]); i += length
-        decrypted = decrypt_model_parameters(chunks, self.private_context)
+        decrypted = decrypt_model_parameters(chunks, self.ckks_context)
         for p, arr in zip(self.model.parameters(), decrypted):
             p.data = torch.tensor(arr.reshape(p.shape), dtype=torch.float32)
 
@@ -108,4 +95,7 @@ class FlowerClient(fl.client.NumPyClient):
         return 1 - dice, len(self.val_dl.dataset), {"dice": float(dice)}
 
 if __name__ == "__main__":
-    fl.client.start_client(server_address="localhost:8080", client=FlowerClient().to_client())
+    fl.client.start_client(
+        server_address="localhost:8080",
+        client=FlowerClient().to_client(),
+    )
