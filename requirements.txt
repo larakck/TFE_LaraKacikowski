@@ -23,4 +23,4 @@ protobuf>=3.19.0
 
 # Pour Windows : installez aussi CMake/Ninja via chocolately ou manuel
 #   choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'  
-#   choco install ninja
+#   choco install ninja --installargs 'ADD_NINJA_TO_PATH=System'
