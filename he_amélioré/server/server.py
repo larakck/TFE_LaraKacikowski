@@ -6,7 +6,7 @@ import gc
 import hashlib
 
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
-from he_fileless.utils.encryption_utils import create_ckks_context
+from he_amélioré.utils.encryption_utils import create_ckks_context
 
 def sha_of_array(arr):
     return hashlib.sha256(arr).hexdigest()
@@ -51,6 +51,6 @@ if __name__ == "__main__":
     strategy = HEFedAvg(fraction_fit=1.0, min_fit_clients=1, min_available_clients=1)
     fl.server.start_server(
         server_address="localhost:8080",
-        config=fl.server.ServerConfig(num_rounds=3),
+        config=fl.server.ServerConfig(num_rounds=10),
         strategy=strategy,
     )
