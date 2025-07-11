@@ -22,35 +22,49 @@ class HEFedAvg(fl.server.strategy.FedAvg):
 
         print(f"[SERVER] Round {rnd}: aggregation with {len(results)} client(s)")
 
-        # 🔹 Extraction des poids chiffrés sous forme de ndarrays
-        encrypted_ndarrays_all = [parameters_to_ndarrays(res.parameters) for _, res in results]
+        # 1) Récupère tous les chunks encryptés
+        encrypted_ndarrays_all = [
+            parameters_to_ndarrays(res.parameters) for _, res in results
+        ]
         n_clients = len(encrypted_ndarrays_all)
-        n_layers = len(encrypted_ndarrays_all[0])
+        n_layers  = len(encrypted_ndarrays_all[0])
         aggregated = []
 
+        # 2) Pour chaque layer, on fait uniquement la somme HE
         for i in range(n_layers):
-            # 🔁 Agrégation homomorphe
-            vec = ts.ckks_vector_from(self.context, encrypted_ndarrays_all[0][i].tobytes())
+            ct = ts.ckks_vector_from(
+                self.context,
+                encrypted_ndarrays_all[0][i].tobytes()
+            )
             for client_chunks in encrypted_ndarrays_all[1:]:
-                vec += ts.ckks_vector_from(self.context, client_chunks[i].tobytes())
-            vec *= (1.0 / n_clients)
-            serialized = vec.serialize()
-            aggregated.append(np.frombuffer(serialized, dtype=np.uint8))
+                ct += ts.ckks_vector_from(
+                    self.context,
+                    client_chunks[i].tobytes()
+                )
+            # 🚫 Plus de division ni de rescale ici !
+            aggregated.append(
+                np.frombuffer(ct.serialize(), dtype=np.uint8)
+            )
 
-        # ✅ SHA-256 hash debug sur le layer 0 agrégé
+        # Debug hash
         hash_val = sha_of_array(aggregated[0])
-        print(f"[SERVER DEBUG] 🔐 SHA256 du poids agrégé (layer 0) : {hash_val}")
+        print(f"[SERVER DEBUG] 🔐 SHA256 layer0 = {hash_val}")
 
         gc.collect()
-        print(f"[SERVER] RAM used: {psutil.virtual_memory().used / (1024**3):.2f} GB")
+        print(f"[SERVER] RAM used: {psutil.virtual_memory().used / (1024**3):.2f} GB")
 
+        # 3) On renvoie la somme chiffrée brute
         return ndarrays_to_parameters(aggregated), {}
 
 if __name__ == "__main__":
-    print("[SERVER] Starting HE Flower server (safe config)...")
-    strategy = HEFedAvg(fraction_fit=1.0, min_fit_clients=1, min_available_clients=1)
+    print("[SERVER] Starting HE Flower server (no-avg config)…")
+    strategy = HEFedAvg(
+        fraction_fit=1.0,
+        min_fit_clients=2,
+        min_available_clients=2,
+    )
     fl.server.start_server(
         server_address="localhost:8080",
-        config=fl.server.ServerConfig(num_rounds=10),
+        config=fl.server.ServerConfig(num_rounds=20),
         strategy=strategy,
     )

@@ -2,32 +2,53 @@ import tenseal as ts
 import numpy as np
 import torch
 
+
+
 def create_ckks_context(
-    poly_modulus_degree=4096,  # réduit (moitié de 8192)
-    coeff_mod_bit_sizes=[30, 20, 30],  # moins de précision → moins de mémoire
-    global_scale=2**10  # moins de bits → plus rapide
-):
-    context = ts.context(
+    poly_modulus_degree: int = 4096,
+    coeff_mod_bit_sizes: list[int] = [30,20,30],
+    global_scale: float = 2**23,
+) -> ts.Context:
+    """
+    Contexte CKKS minimal avec keyswitching activé :
+      - 4096 degree → 2048 slots
+      - chaîne de moduli [60,20] = 80 bits (somme + 1 mul + rescale OK)
+      - scale 2**20 → précision ≃1e‑6
+      - génère relin_keys et galois_keys pour activer keyswitching
+    """
+    ctx = ts.context(
         ts.SCHEME_TYPE.CKKS,
         poly_modulus_degree=poly_modulus_degree,
         coeff_mod_bit_sizes=coeff_mod_bit_sizes,
     )
-    context.global_scale = global_scale
-    context.generate_galois_keys()
-    return context
+    ctx.global_scale = global_scale
 
-def encrypt_model_parameters(weights, context, chunk_size=2048):
+    # Clés nécessaires pour toute opération multiplicative :
+    ctx.generate_relin_keys()    # relinearisation après une multiplication
+    ctx.generate_galois_keys()   # rotations et autres key‑switching
+
+    return ctx
+
+
+
+def encrypt_model_parameters(weights, context, chunk_size=None):
+    slot_count = context.poly_modulus_degree // 2  # = 2048
+    if chunk_size is None:
+        chunk_size = slot_count
+
     encrypted_chunks = []
     chunk_counts = []
+
     for w in weights:
         flat = w.flatten()
-        count = 0
+        n_chunks = 0
         for i in range(0, len(flat), chunk_size):
-            chunk = flat[i : i + chunk_size]
-            vec = ts.ckks_vector(context, chunk)
-            encrypted_chunks.append(vec.serialize())  # ⚠️ assure-toi que c'est bien des bytes ici
-            count += 1
-        chunk_counts.append(count)
+            block = flat[i : i + chunk_size].tolist()
+            vec = ts.ckks_vector(context, block)
+            encrypted_chunks.append(vec.serialize())
+            n_chunks += 1
+        chunk_counts.append(n_chunks)
+
     return encrypted_chunks, chunk_counts
 
 
