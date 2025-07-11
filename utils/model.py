@@ -8,10 +8,10 @@ class UNet(nn.Module):
             return nn.Sequential(
                 nn.Conv2d(in_ch, out_ch, 3, padding=1),
                 nn.GroupNorm(4, out_ch),
-                nn.ReLU(inplace=True),
+                nn.ReLU(),
                 nn.Conv2d(out_ch, out_ch, 3, padding=1),
                 nn.GroupNorm(4, out_ch),
-                nn.ReLU(inplace=True),
+                nn.ReLU(),
                 nn.Dropout(0.2)
             )
         self.enc1 = CBR(1, 64)

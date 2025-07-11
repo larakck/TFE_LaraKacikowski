@@ -5,17 +5,11 @@ import torch
 
 
 def create_ckks_context(
-    poly_modulus_degree: int = 4096,
-    coeff_mod_bit_sizes: list[int] = [30,20,30],
-    global_scale: float = 2**23,
+    poly_modulus_degree: int      = 4096,           # ⬇️ moitié de 8192 : moins de RAM
+    coeff_mod_bit_sizes: list[int] = [60, 20, 20],  # 60+20+20 =100 bits ≤109 bits max pour 4096
+    global_scale: float            = 2**20,         # ≃1e6 → quantization error ~1e-6 
 ) -> ts.Context:
-    """
-    Contexte CKKS minimal avec keyswitching activé :
-      - 4096 degree → 2048 slots
-      - chaîne de moduli [60,20] = 80 bits (somme + 1 mul + rescale OK)
-      - scale 2**20 → précision ≃1e‑6
-      - génère relin_keys et galois_keys pour activer keyswitching
-    """
+
     ctx = ts.context(
         ts.SCHEME_TYPE.CKKS,
         poly_modulus_degree=poly_modulus_degree,
@@ -26,7 +20,9 @@ def create_ckks_context(
     # Clés nécessaires pour toute opération multiplicative :
     ctx.generate_relin_keys()    # relinearisation après une multiplication
     ctx.generate_galois_keys()   # rotations et autres key‑switching
-
+    ctx.poly_modulus_degree = poly_modulus_degree
+    ctx.coeff_mod_bit_sizes = coeff_mod_bit_sizes
+    ctx.global_scale = global_scale
     return ctx
 
 

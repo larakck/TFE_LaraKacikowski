@@ -66,7 +66,7 @@ def main():
         # Démarrer le serveur pour ce nm
         fl.server.start_server(
             server_address="localhost:8080",
-            config=fl.server.ServerConfig(num_rounds=6),
+            config=fl.server.ServerConfig(num_rounds=15),
             strategy=strategy,
         )
 

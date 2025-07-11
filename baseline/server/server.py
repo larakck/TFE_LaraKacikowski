@@ -52,7 +52,7 @@ for nm in noise_multipliers:
 
     history = fl.server.start_server(
         server_address="localhost:8080",
-        config=fl.server.ServerConfig(num_rounds=5),
+        config=fl.server.ServerConfig(num_rounds=20),
         strategy=strategy,
     )
 

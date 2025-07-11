@@ -34,7 +34,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
         self.criterion = DiceLoss()
         self.train_dl, self.val_dl = get_dataloaders(
-            "multicenter/train/Dataset001_Algeria", augment=False
+            "multicenter/external/Dataset004_SierraLeone", augment=False
         )
         # =================
         # Création du contexte CKKS
@@ -69,7 +69,7 @@ class FlowerClient(fl.client.NumPyClient):
             print(f"[DEBUG] 🔍 Poids reçus (0,0,0,0) : {decrypted[0].flatten()[0]}")
 
             # ==== MODIF : moyenne en clair ====
-            n_clients = 2  # Remplacez par le nombre réel de clients si >1
+            n_clients = 1  # Remplacez par le nombre réel de clients si >1
             averaged = [w / n_clients for w in decrypted]
             set_model_parameters(self.model, averaged)
             print(f"[CLIENT] 🚀 Poids moyennés appliqués (n_clients={n_clients})")
