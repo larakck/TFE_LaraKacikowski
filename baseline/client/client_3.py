@@ -13,24 +13,38 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Fonction de perte : Dice Loss
-class DiceLoss(nn.Module):
-    def __init__(self):
-        super(DiceLoss, self).__init__()
+def dice_loss(probs, target, smooth=1e-6):
+    """
+    Dice Loss simple. Reçoit des probabilités entre 0 et 1.
+    """
+    probs = probs.contiguous()
+    target = target.contiguous()
 
-    def forward(self, preds, targets):
-        smooth = 1.0
-        preds = torch.sigmoid(preds)
-        preds = preds.view(-1)
-        targets = targets.view(-1)
-        intersection = (preds * targets).sum()
-        return 1 - ((2.0 * intersection + smooth) / (preds.sum() + targets.sum() + smooth))
+    intersection = (probs * target).sum(dim=(2, 3))
+    union = probs.sum(dim=(2, 3)) + target.sum(dim=(2, 3))
+
+    dice = (2. * intersection + smooth) / (union + smooth)
+    return 1 - dice.mean()
+
+class BCEWithLogitsDiceLoss(nn.Module):
+    def __init__(self, bce_weight=0.5, dice_weight=0.5):
+        super().__init__()
+        self.bce = nn.BCEWithLogitsLoss()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+
+    def forward(self, logits, target):
+        bce = self.bce(logits, target)
+        probs = torch.sigmoid(logits)  # pour le Dice uniquement
+        dice = dice_loss(probs, target)
+        return self.bce_weight * bce + self.dice_weight * dice
+
 
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self):
         self.model = UNet().to(DEVICE)
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
-        self.criterion = DiceLoss()
+        self.criterion = BCEWithLogitsDiceLoss(bce_weight=0.3, dice_weight=0.7)
         # Activation de l'augmentation car dataset plus petit
         self.train_dl, self.val_dl = get_dataloaders("multicenter/train/Dataset001_Algeria", augment=True)
 

@@ -34,14 +34,17 @@ class SaveMetricsStrategy(fl.server.strategy.FedAvg):
         if results:
             self.losses.append(sum(r.metrics["loss"] for _, r in results) / len(results))
             self.dices.append(sum(r.metrics["dice"] for _, r in results) / len(results))
-            self.epsilons.append(sum(r.metrics["epsilon"] for _, r in results) / len(results))
+            epsilons = [r.metrics["epsilon"] for _, r in results if "epsilon" in r.metrics]
+            if epsilons:
+                self.epsilons.append(sum(epsilons) / len(epsilons))
+
 
         return aggregated_parameters, metrics_aggregated
 
 
 def main():
     # Liste des bruitages à tester
-    noise_multipliers = [1, 1.5, 1.8, 2.0, 2.2, 2.5, 3.0]
+    noise_multipliers = [0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 2.8, 3.0]
 
     all_losses = {}
     all_dices = {}
@@ -58,8 +61,8 @@ def main():
         strategy = SaveMetricsStrategy(
             noise_multiplier=nm,
             fraction_fit=1.0,
-            min_fit_clients=3,
-            min_available_clients=3,
+            min_fit_clients=2,
+            min_available_clients=2,
             on_fit_config_fn=send_config_fn,  # ← injection du noise
         )
 

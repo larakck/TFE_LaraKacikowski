@@ -9,6 +9,8 @@ import torch
 
 class ClientDataset(Dataset):
     def __init__(self, data_dir, split="train", seed=42, img_size=128, augment=False):
+        self.img_size = img_size
+
         self.samples = []
         all_samples = []
         images_dir = os.path.join(data_dir, "imagesTr")
@@ -34,6 +36,7 @@ class ClientDataset(Dataset):
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(20),
                 transforms.RandomResizedCrop((img_size, img_size), scale=(0.8, 1.0)),
+                #transforms.RandomVerticalFlip(),
                 transforms.ColorJitter(brightness=0.1, contrast=0.1),#amodif 
                 transforms.GaussianBlur(kernel_size=3)
             ]
@@ -49,6 +52,7 @@ class ClientDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
+
         img_path, mask_path = self.samples[idx]
         image = Image.open(img_path).convert("L")
         mask = Image.open(mask_path).convert("L")
@@ -56,9 +60,18 @@ class ClientDataset(Dataset):
         image = self.transform(image)
 
         # Resize + binarisation du masque
-        mask = transforms.Resize((128, 128))(mask)
+        mask = transforms.Resize(
+            (self.img_size, self.img_size),
+                interpolation=transforms.InterpolationMode.NEAREST  # ⬅️ très important
+        )(mask)
+
+
+
+
         mask = transforms.ToTensor()(mask)
         mask = (mask > 0.1).float()
+        #print("Mask unique values:", torch.unique(mask))
+
 
         return image, mask
 

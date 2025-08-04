@@ -43,8 +43,8 @@ for nm in noise_multipliers:
 
     strategy = SaveMetricsStrategy(
         fraction_fit=1.0,
-        min_fit_clients=1,
-        min_available_clients=1,
+        min_fit_clients=3,
+        min_available_clients=3,
         noise_multiplier=nm,
     )
 
