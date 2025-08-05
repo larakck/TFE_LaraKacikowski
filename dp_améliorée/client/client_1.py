@@ -91,28 +91,30 @@ class BCEDiceLoss(nn.Module):
     def __init__(self, bce_weight=0.5, dice_weight=0.5, smooth=1e-6):
         super().__init__()
         self.bce = nn.BCEWithLogitsLoss()
-        self.dice_loss = DiceLoss()
-        self.criterion = lambda p, t: 0.5 * self.bce(p, t) + 0.5 * self.dice_loss(p, t)
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self.smooth = smooth
 
-        self.train_dl, self.val_dl = get_dataloaders(
-            "multicenter/external/Dataset004_SierraLeone",
-            batch_size=batch_size,
-            augment=True
-        )
+    def forward(self, pred, target):
+        bce_loss = self.bce(pred, target)
+        pred = torch.sigmoid(pred)
+        pred_flat, target_flat = pred.view(-1), target.view(-1)
+        intersection = (pred_flat * target_flat).sum()
+        dice_loss = 1 - (2 * intersection + self.smooth) / (pred_flat.sum() + target_flat.sum() + self.smooth)
+        return self.bce_weight * bce_loss + self.dice_weight * dice_loss
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=2
-        )
-
-        # DP attributes
-        self.privacy_engine = None
-        self.dp_enabled = False
-        self.noise_multiplier = noise_multiplier
-        self.batch_size = batch_size
-        self.sample_rate = batch_size / len(self.train_dl.dataset)
-        self.max_grad_norm = max_grad_norm
-        self.local_epochs = local_epochs
+# === Flower Client ===
+class FLClient(fl.client.NumPyClient):
+    def __init__(self):
+        self.model = UNet()
+        if not ModuleValidator.is_valid(self.model):
+            self.model = ModuleValidator.fix(self.model)
+        self.model = self.model.to(device)
+        self.criterion = BCEDiceLoss()
+        self.dataset = FetalHCDataset(IMG_DIR, MASK_DIR, transform=get_train_transforms())
+        self.delta = 1 / len(self.dataset)
+        self.epsilon = 0.0
+        self.cumulative_privacy_engine = None  # Réutilisée pour cumul
 
     def get_parameters(self, config=None):
         return [val.detach().cpu().numpy() for val in self.model.parameters()]
@@ -193,4 +195,3 @@ class BCEDiceLoss(nn.Module):
 # === Lancer le client ===
 if __name__ == "__main__":
     fl.client.start_numpy_client(server_address="127.0.0.1:8080", client=FLClient())
-
