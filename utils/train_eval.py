@@ -1,5 +1,3 @@
-# === utils/train_eval.py (modifié avec skip des batches vides) ===
-
 import torch
 import torch.nn as nn
 from .metrics import dice_score, pixel_accuracy, visualize_predictions, ellipse_dice_score
@@ -14,7 +12,6 @@ def train(model, dataloader, optimizer, criterion):
     valid_batches = 0
 
     for batch_idx, (x, y) in enumerate(dataloader):
-        # ← Skip empty batches
         if x.size(0) == 0:
             print(f"[TRAIN] Skipping empty batch {batch_idx}")
             continue
@@ -56,27 +53,48 @@ def train(model, dataloader, optimizer, criterion):
     else:
         avg_loss = avg_acc = avg_dice = 0.0
 
-    avg = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
-    print(f"[TRAIN] Epoch finished. Avg loss: {avg:.4f}")
-    return avg
+    print(f"[TRAIN] Epoch finished. Avg Loss: {avg_loss:.4f} | Avg Dice: {avg_dice:.4f} | Avg Acc: {avg_acc:.4f}")
+    return avg_loss, avg_dice, avg_acc
 
 
 def evaluate(model, dataloader, criterion=None):
     model.eval()
-    total_dice = 0
+    total_loss = 0.0
+    total_acc = 0.0
+    total_dice = 0.0
     valid_batches = 0
+    total_dice_ellipse = 0.0
+
     with torch.no_grad():
         for x, y in dataloader:
-            # ← Skip empty batches
             if x.size(0) == 0:
                 continue
 
             x, y = x.to(DEVICE), y.to(DEVICE)
-            pred = torch.sigmoid(model(x))
-            total_dice += dice_score(pred, y)
+            logits = model(x)
+            probs = torch.sigmoid(logits)
+
+            acc = pixel_accuracy(probs, y)
+            dice_ell = ellipse_dice_score((probs > 0.5), y)
+            dice = dice_score(probs, y)
+            loss = criterion(logits, y).item() if criterion else 0.0
+
+            total_loss += loss
+            total_dice_ellipse += dice_ell
+            total_acc += acc
+            total_dice += dice
             valid_batches += 1
 
-    return (total_dice / valid_batches) if valid_batches > 0 else 0.0
+    if valid_batches > 0:
+        avg_loss = total_loss / valid_batches
+        avg_acc = total_acc / valid_batches
+        avg_dice = total_dice / valid_batches
+        avg_dice_ellipse = total_dice_ellipse / valid_batches
+    else:
+        avg_loss = avg_dice_ellipse = avg_acc = avg_dice = 0.0
+
+    print(f"[VAL] Avg Loss: {avg_loss:.4f} | Avg Dice: {avg_dice:.4f} | Ellipse Dice: {avg_dice_ellipse:.4f}| Avg Acc: {avg_acc:.4f}")
+    return avg_loss, avg_dice, avg_acc, avg_dice_ellipse
 
 
 def set_model_parameters(model: torch.nn.Module, parameters: list[torch.Tensor]) -> None:
