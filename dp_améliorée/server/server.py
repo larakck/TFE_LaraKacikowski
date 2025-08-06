@@ -61,8 +61,8 @@ def main():
         strategy = SaveMetricsStrategy(
             noise_multiplier=nm,
             fraction_fit=1.0,
-            min_fit_clients=2,
-            min_available_clients=2,
+            min_fit_clients=1,
+            min_available_clients=1,
             on_fit_config_fn=send_config_fn,  # ← injection du noise
         )
 
