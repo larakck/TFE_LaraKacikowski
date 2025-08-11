@@ -4,13 +4,14 @@ from utils2.dataset import FetalHCDataset, get_train_transforms
 from utils2.model import UNet
 from utils2.metrics import BCEDiceLoss, pixel_accuracy, dice_score, iou_score, plot_training_metrics, visualize_predictions
 from utils2.train_eval import train_model
+import matplotlib.pyplot as plt
 
 # --- Set device ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 if __name__ == '__main__':
-    BASE_DATA_DIR = os.path.join("1327317", "training_set_processed", "clients_split", "client1")
+    BASE_DATA_DIR = os.path.join("1327317", "training_set_processed")
 
 
     IMAGES_DIR = os.path.join(BASE_DATA_DIR, 'imagesTr')
@@ -67,8 +68,14 @@ if __name__ == '__main__':
         max_grad_norm=dp_max_grad_norm
     )
 
+    print("\n=== Validation & Test ===")
+    print(f"Best Val Dice: {max(history['val_dice']):.4f}")
+    print(f"Test Dice: {history['test_dice']:.4f} | Test Loss: {history['test_loss']:.4f} | Test Acc: {history['test_accuracy']:.4f}")
+
+
     print("\n=== Step 3: Plotting Training Metrics ===")
     plot_training_metrics(history, f'training_metrics_{dataset_type}.png')
+    plt.close('all')  # Close all plots to free memory
 
     print("\n=== Step 4: Visualizing Sample Predictions ===")
     vis_dataset = FetalHCDataset(

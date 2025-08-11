@@ -2,4 +2,4 @@ multicenter/
 weights/
 dp/weights/
 1327317/
-processed_masks/
+processed_masks/'*.pth' 

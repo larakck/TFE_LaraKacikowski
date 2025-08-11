@@ -43,21 +43,25 @@ def iou_score(pred, target, smooth=1e-6):
 
 def plot_training_metrics(history, save_path='training_metrics.png'):
     epochs = range(1, len(history['loss']) + 1)
-    fig, axs = plt.subplots(2, 2, figsize=(15, 10))
-    titles = ['Loss', 'Accuracy', 'Dice Score', 'IoU Score']
-    keys = ['loss', 'accuracy', 'dice', 'iou']
-    colors = ['b', 'g', 'r', 'm']
-    for ax, key, title, color in zip(axs.flat, keys, titles, colors):
+    fig, axs = plt.subplots(1, 3, figsize=(18, 5))  # 1 ligne, 3 colonnes
+
+    titles = ['Loss', 'Accuracy', 'Dice Score']
+    keys = ['loss', 'accuracy', 'dice']
+    colors = ['b', 'g', 'r']
+
+    for ax, key, title, color in zip(axs, keys, titles, colors):
         ax.plot(epochs, history[key], f'{color}-', label=f'Training {title}')
         ax.set_title(f'Training {title}')
         ax.set_xlabel('Epoch')
         ax.set_ylabel(title)
         ax.legend()
         ax.grid(True)
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.show()
     print(f"Training metrics plot saved to {save_path}")
+
 
 def visualize_predictions(model, dataset, device, num_samples=4, save_path='sample_predictions.png'):
     import numpy as np

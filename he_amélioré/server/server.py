@@ -22,7 +22,7 @@ import tenseal as ts
 from utils2.model import UNet
 from utils2.metrics import BCEDiceLoss, dice_score, pixel_accuracy
 from utils2.dataset import FetalHCDataset, get_train_transforms
-from utils2.train_eval import train_model_client
+from utils2.train_eval import train_model_client  # (import conservé pour cohérence)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -173,7 +173,9 @@ class ModelEncryptor:
 class HEFederatedClient:
     """Federated learning client with homomorphic encryption"""
     
-    def __init__(self, client_id: str, data_indices: List[int], full_dataset: Dataset,
+    def __init__(self, client_id: str,
+                 train_indices: List[int], val_indices: List[int],
+                 full_dataset: Dataset,
                  he_context: TenSEALContext, encrypt_layers: List[str] = None,
                  batch_size: int = 4, learning_rate: float = 1e-3):
         self.client_id = client_id
@@ -181,12 +183,20 @@ class HEFederatedClient:
         self.he_context = he_context
         self.encryptor = ModelEncryptor(he_context, encrypt_layers)
         
-        # Create client's local dataset
-        self.local_dataset = Subset(full_dataset, data_indices)
+        # Subsets explicites 70/15
+        self.train_subset = Subset(full_dataset, train_indices)
+        self.val_subset   = Subset(full_dataset, val_indices)
+
         self.train_loader = DataLoader(
-            self.local_dataset, 
+            self.train_subset, 
             batch_size=batch_size, 
             shuffle=True,
+            num_workers=0
+        )
+        self.val_loader   = DataLoader(
+            self.val_subset, 
+            batch_size=batch_size, 
+            shuffle=False,
             num_workers=0
         )
         
@@ -196,7 +206,7 @@ class HEFederatedClient:
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=10, eta_min=1e-5)
         self.criterion = BCEDiceLoss(bce_weight=0.5, dice_weight=0.5)
         
-        print(f"  HE Client {client_id} initialized with {len(self.local_dataset)} samples")
+        print(f"  HE Client {client_id} initialized with {len(self.train_subset)} train / {len(self.val_subset)} val samples")
     
     def local_train(self, global_weights: Optional[Dict] = None, epochs: int = 3) -> Dict:
         """Train local model and return encrypted weights"""
@@ -239,20 +249,38 @@ class HEFederatedClient:
                           f"Batch {batch_idx+1}/{len(self.train_loader)}: "
                           f"Loss={loss.item():.4f}, Dice={batch_dice.item():.4f}")
             
-            avg_loss = epoch_loss / num_batches
-            avg_dice = epoch_dice / num_batches
+            avg_loss = epoch_loss / max(1, num_batches)
+            avg_dice = epoch_dice / max(1, num_batches)
             total_loss += avg_loss
             total_dice += avg_dice
             total_batches += 1
             
             self.scheduler.step()
         
-        # Store final metrics
-        self.last_loss = total_loss / total_batches
-        self.last_dice = total_dice / total_batches
+        # Train metrics (moyenne par epoch)
+        self.last_loss = total_loss / max(1, total_batches)
+        self.last_dice = total_dice / max(1, total_batches)
         
+        # --- Validation locale (15%) ---
+        self.model.eval()
+        val_loss = 0.0
+        val_dice = 0.0
+        val_batches = 0
+        with torch.no_grad():
+            for images, masks in self.val_loader:
+                images, masks = images.to(self.device), masks.to(self.device)
+                logits = self.model(images)
+                loss = self.criterion(logits, masks)
+                val_loss += loss.item()
+                val_dice += dice_score(logits, masks).item()
+                val_batches += 1
+        self.last_val_loss = val_loss / max(1, val_batches)
+        self.last_val_dice = val_dice / max(1, val_batches)
+
         print(f"[HE Client {self.client_id}] Training completed: "
-              f"Loss={self.last_loss:.4f}, Dice={self.last_dice:.4f}")
+              f"Train Loss={self.last_loss:.4f}, Train Dice={self.last_dice:.4f}")
+        print(f"[HE Client {self.client_id}] Validation: "
+              f"Loss={self.last_val_loss:.4f}, Dice={self.last_val_dice:.4f}")
         
         # Encrypt and return model weights
         print(f"[HE Client {self.client_id}] Encrypting model weights...")
@@ -388,8 +416,8 @@ class HEFederatedServer:
                 total_dice += dice.item()
                 num_batches += 1
         
-        avg_loss = total_loss / num_batches
-        avg_dice = total_dice / num_batches
+        avg_loss = total_loss / max(1, num_batches)
+        avg_dice = total_dice / max(1, num_batches)
         
         return avg_loss, avg_dice
 
@@ -404,22 +432,22 @@ def plot_he_federated_results(metrics: Dict, num_clients: int, save_path: str = 
                  fontsize=14, fontweight='bold')
     
     # Loss
-    ax1.plot(rounds, metrics['loss'], 'b-o', linewidth=2, markersize=8)
+    ax1.plot(rounds, metrics['loss'], 'o-', linewidth=2, markersize=8)
     ax1.set_title('Training Loss (Encrypted)', fontweight='bold')
     ax1.set_xlabel('Federated Round')
     ax1.set_ylabel('Average Loss')
     ax1.grid(True, alpha=0.3)
     
     # Dice Score
-    ax2.plot(rounds, metrics['dice'], 'g-s', linewidth=2, markersize=8)
+    ax2.plot(rounds, metrics['dice'], 's-', linewidth=2, markersize=8)
     ax2.set_title('Dice Score Progress (Encrypted)', fontweight='bold')
     ax2.set_xlabel('Federated Round')
     ax2.set_ylabel('Average Dice Score')
     ax2.grid(True, alpha=0.3)
     
     # Round Times
-    ax3.bar(rounds, metrics['time'], color='orange', alpha=0.7, label='Total Time')
-    ax3.bar(rounds, metrics['encryption_time'], color='red', alpha=0.7, label='Encryption Time')
+    ax3.bar(rounds, metrics['time'], alpha=0.7, label='Total Time')
+    ax3.bar(rounds, metrics['encryption_time'], alpha=0.7, label='Encryption Time')
     ax3.set_title('Time per Round', fontweight='bold')
     ax3.set_xlabel('Federated Round')
     ax3.set_ylabel('Time (seconds)')
@@ -448,12 +476,12 @@ Privacy-preserving aggregation"""
     plt.show()
     print(f"Results saved to: {save_path}")
 
-def visualize_predictions(model, dataset, device, num_samples=4, save_path="fl_he_multicenter_predictions.png"):
+def visualize_predictions(model, dataset, device, num_samples=4, save_path="fl_he_hc18_predictions.png"):
     """Visualize model predictions"""
     model.eval()
     
     fig, axes = plt.subplots(3, num_samples, figsize=(16, 10))
-    fig.suptitle('HE Federated Learning Model Predictions (Multicenter)', fontsize=16, fontweight='bold')
+    fig.suptitle('HE Federated Learning Model Predictions (HC18)', fontsize=16, fontweight='bold')
     
     with torch.no_grad():
         for i in range(num_samples):
@@ -477,11 +505,11 @@ def visualize_predictions(model, dataset, device, num_samples=4, save_path="fl_h
             axes[0, i].set_title(f'Input {i+1}', fontsize=10)
             axes[0, i].axis('off')
             
-            axes[1, i].imshow(mask_np, cmap='viridis', vmin=0, vmax=1)
-            axes[1, i].set_title(f'Ground Truth', fontsize=10)
+            axes[1, i].imshow(mask_np, vmin=0, vmax=1)
+            axes[1, i].set_title('Ground Truth', fontsize=10)
             axes[1, i].axis('off')
             
-            axes[2, i].imshow(pred_prob_np, cmap='viridis', vmin=0, vmax=1)
+            axes[2, i].imshow(pred_prob_np, vmin=0, vmax=1)
             axes[2, i].set_title(f'Prediction (Dice: {dice:.3f})', fontsize=10)
             axes[2, i].axis('off')
     
@@ -498,6 +526,7 @@ def visualize_predictions(model, dataset, device, num_samples=4, save_path="fl_h
     print(f"Predictions saved to: {save_path}")
     
     model.train()
+
 def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None):
     print("="*70)
     print("FEDERATED LEARNING WITH HOMOMORPHIC ENCRYPTION")
@@ -532,13 +561,29 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         )
         all_datasets.append(dataset)
 
-    # Create HE clients
+    # --- Split 70/15/15 par client, puis test global ---
+    rng = np.random.default_rng(42)
+    test_subsets = []
     clients = []
+
     for i, dataset in enumerate(all_datasets):
-        indices = list(range(len(dataset)))
+        n = len(dataset)
+        idx = np.arange(n)
+        rng.shuffle(idx)
+
+        n_train = int(0.70 * n)
+        n_val   = int(0.15 * n)
+        n_test  = n - n_train - n_val
+
+        train_idx = idx[:n_train].tolist()
+        val_idx   = idx[n_train:n_train+n_val].tolist()
+        test_idx  = idx[n_train+n_val:].tolist()
+
+        # Client avec ses splits explicites
         client = HEFederatedClient(
             client_id=f"HE_Client_{i+1}",
-            data_indices=indices,
+            train_indices=train_idx,
+            val_indices=val_idx,
             full_dataset=dataset,
             he_context=he_context,
             encrypt_layers=encrypt_layers,
@@ -547,18 +592,14 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         )
         clients.append(client)
 
-    # Concatenate all data for test set
-    from torch.utils.data import ConcatDataset, random_split
+        # Contribue au test global
+        test_subsets.append(Subset(dataset, test_idx))
 
-    combined = ConcatDataset(all_datasets)
-    total = len(combined)
-    test_size = max(10, int(0.2 * total))
-    train_size = total - test_size
-
-    train_set, test_set = random_split(combined, [train_size, test_size])
+    from torch.utils.data import ConcatDataset
+    test_set = ConcatDataset(test_subsets)
     test_loader = DataLoader(test_set, batch_size=16, shuffle=False)
 
-    print(f"\nUsing {len(test_set)} samples for testing")
+    print(f"\nUsing {sum(len(s) for s in test_subsets)} samples for GLOBAL TEST (15% per client)")
 
     # HE Server
     server = HEFederatedServer(he_context, encrypt_layers)
@@ -579,6 +620,8 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         client_weights = []
         client_losses = []
         client_dices = []
+        client_val_losses = []
+        client_val_dices = []
 
         for client in clients:
             print(f"\n[{client.client_id}] Starting local training...")
@@ -593,6 +636,8 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
             client_weights.append(encrypted_weights)
             client_losses.append(client.last_loss)
             client_dices.append(client.last_dice)
+            client_val_losses.append(client.last_val_loss)
+            client_val_dices.append(client.last_val_dice)
 
         aggregated_weights = server.aggregate_encrypted_weights(client_weights)
         server.update_global_model(aggregated_weights)
@@ -600,8 +645,10 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         test_loss, test_dice = server.evaluate_global_model(test_loader)
 
         round_time = time.time() - round_start
-        avg_loss = np.mean(client_losses)
-        avg_dice = np.mean(client_dices)
+        avg_loss = float(np.mean(client_losses)) if client_losses else 0.0
+        avg_dice = float(np.mean(client_dices)) if client_dices else 0.0
+        avg_val_loss = float(np.mean(client_val_losses)) if client_val_losses else 0.0
+        avg_val_dice = float(np.mean(client_val_dices)) if client_val_dices else 0.0
 
         server.round_metrics['loss'].append(avg_loss)
         server.round_metrics['dice'].append(avg_dice)
@@ -609,8 +656,10 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         server.round_metrics['encryption_time'].append(encryption_time)
 
         print(f"\nRound {round_num + 1} Summary:")
-        print(f"  Average Client Loss: {avg_loss:.4f}")
-        print(f"  Average Client Dice: {avg_dice:.4f}")
+        print(f"  Average Client Train Loss: {avg_loss:.4f}")
+        print(f"  Average Client Train Dice: {avg_dice:.4f}")
+        print(f"  Average Client Val  Loss: {avg_val_loss:.4f}")
+        print(f"  Average Client Val  Dice: {avg_val_dice:.4f}")
         print(f"  Test Loss: {test_loss:.4f}")
         print(f"  Test Dice: {test_dice:.4f}")
         print(f"  Round Time: {round_time:.2f}s (Encryption: {encryption_time:.2f}s)")
@@ -622,69 +671,24 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
     print("\nModel saved to fl_he_model_clientsplit.pth")
 
     # Plot results
-    plot_he_federated_results(server.round_metrics, num_clients=3)
+    plot_he_federated_results(server.round_metrics, num_clients=len(clients))
     visualize_predictions(server.global_model, test_set, device)
 
 # --- 8. Main Execution ---
 def main():
     """Main execution"""
     run_he_federated_learning(
-            num_rounds=5,
-            # num_clients=1,
-            local_epochs=3,
-            encrypt_layers = [
-                'final.weight',
-                'final.bias',
-                'upconv1.weight',
-                'upconv1.bias',
-                'dec1.0.weight',
-                'dec1.0.bias'
-            ]
-
-        )
-    # # Configuration
-    # CONFIG = {
-    #     # 'multicenter_dir': './multicenter',  # Path to multicenter data
-    #     'num_rounds': 8,                     # Federated rounds
-    #     'num_clients': 1,                    # Number of clients
-    #     'local_epochs': 3,                   # Local training epochs per round
-    #     # 'samples_per_client': 50,            # Samples per client (will be adjusted based on available data)
-    #     'encrypt_layers': [
-    #         # Output layer (critical for segmentation)
-    #         'final.weight',      # 64 parameters
-    #         'final.bias',        # 1 parameter
-            
-    #         # Upsampling layers (reconstruction path)
-    #         'upconv1.weight',    # 8,192 parameters
-    #         'upconv1.bias',      # 64 parameters
-            
-    #     ]
-    # }
-    
-    # print("HE FEDERATED LEARNING CONFIGURATION:")
-    # for key, value in CONFIG.items():
-    #     print(f"  {key}: {value}")
-    
-    # Check dataset
-    # if not os.path.exists(CONFIG['multicenter_dir']):
-    #     print(f"ERROR: Multicenter dataset not found at {CONFIG['multicenter_dir']}!")
-    #     return
-    
-    # try:
-    #     # Run HE federated learning
-    #     final_model = run_he_federated_learning(**CONFIG)
-        
-    #     print("\n" + "="*70)
-    #     print("HE FEDERATED LEARNING COMPLETED!")
-    #     print("="*70)
-    #     print("Privacy-preserving federated learning with homomorphic encryption successful!")
-    #     print("Model updates were encrypted throughout training")
-    #     print("Server never had access to raw model parameters")
-        
-    # except Exception as e:
-    #     print(f"ERROR: {e}")
-    #     import traceback
-    #     traceback.print_exc()
+        num_rounds=20,
+        local_epochs=3,
+        encrypt_layers = [
+            'final.weight',
+            'final.bias',
+            'upconv1.weight',
+            'upconv1.bias',
+            'dec1.0.weight',
+            'dec1.0.bias'
+        ]
+    )
 
 if __name__ == "__main__":
     main()

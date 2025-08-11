@@ -13,7 +13,7 @@ class UNet(nn.Module):
                 nn.Conv2d(out_ch, out_ch, 3, padding=1),
                 nn.GroupNorm(4, out_ch),
                 nn.ReLU(),
-                nn.Dropout(0.2)
+                nn.Dropout(0.3)
             )
 
         self.enc1 = CBR(1, 64)
