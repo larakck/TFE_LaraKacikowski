@@ -206,7 +206,7 @@ def run_federated_training(client_dirs, num_rounds=20, local_epochs=[1]):
         if test_dices_this_round:
             avg_test_dice = sum(test_dices_this_round) / len(test_dices_this_round)
             all_test_dices.append(avg_test_dice)
-            print(f"[Server] Round {rnd} | Avg TEST Dice across clients: {avg_test_dice:.4f}")
+            print(f"[Server] Round {rnd} | Avg TEST Dice across clients: {avg_test_dice:.4f}, test loss : {test_loss:.4f}" )
 
     # === Visualisation finale après le dernier round ===
     try:

@@ -422,13 +422,13 @@ class HEFederatedServer:
         return avg_loss, avg_dice
 
 # --- 6. Visualization Functions ---
-def plot_he_federated_results(metrics: Dict, num_clients: int, save_path: str = "fl_he_multicenter_results.png"):
+def plot_he_federated_results(metrics: Dict, num_clients: int, save_path: str = "fl_he_hc18_results.png"):
     """Plot federated learning with HE results"""
     
     rounds = range(1, len(metrics['loss']) + 1)
     
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle(f'Federated Learning with Homomorphic Encryption (Multicenter Data)\n{num_clients} clients', 
+    fig.suptitle(f'Federated Learning with Homomorphic Encryption (HC18 Data)\n{num_clients} clients', 
                  fontsize=14, fontweight='bold')
     
     # Loss
@@ -667,7 +667,7 @@ def run_he_federated_learning(num_rounds=5, local_epochs=3, encrypt_layers=None)
         print(f"  🔒 Server never saw raw weights - all operations on encrypted data!")
 
     # Save final model
-    torch.save(server.global_model.state_dict(), "fl_he_model_clientsplit.pth")
+    torch.save(server.global_model.state_dict(), "fl_he_model_clientsplit_hc18.pth")
     print("\nModel saved to fl_he_model_clientsplit.pth")
 
     # Plot results
@@ -683,10 +683,8 @@ def main():
         encrypt_layers = [
             'final.weight',
             'final.bias',
-            'upconv1.weight',
-            'upconv1.bias',
-            'dec1.0.weight',
-            'dec1.0.bias'
+            'conv1.weight',
+            'conv1.bias',
         ]
     )
 

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import gc
@@ -30,14 +30,14 @@ CLIENT_DIRS = [
 
 NUM_ROUNDS = 30
 EPOCHS = 1
-EPOCHS_CLIENT1 = 3  # ⬅️ client1 s’entraîne plus longtemps
+EPOCHS_CLIENT1 = 1  # ⬅️ client1 s’entraîne plus longtemps
 BATCH_SIZE = 16
 LR = 5e-4
 MAX_GRAD_NORM = 2.0
-NOISE_MULTIPLIER = 0.5
+NOISE_MULTIPLIER = 2.8
 TARGET_SIZE = (256, 256)
 VAL_RATIO  = 0.15
-TEST_RATIO = 0.05  # petit test
+TEST_RATIO = 0.15 
 
 # Eval tuning flags
 ENABLE_TTA = True
@@ -45,8 +45,6 @@ ENABLE_POSTPROC = True
 USE_TUNED_FOR_EARLYSTOP = True  # early stop basé sur Dice val "tuned" global
 
 # Early stop config (sur GLOBAL on VAL)
-EARLY_STOP_PATIENCE = 3
-no_improve = 0
 best_global_val_dice = -1.0
 best_global_state = None
 best_round = None
@@ -130,6 +128,195 @@ class FetalHCDataset(Dataset):
 
         return image, mask
 
+# import os
+# import re
+# import cv2
+# import random
+# import numpy as np
+# import torch
+# from torch.utils.data import Dataset
+# import torchvision.transforms as transforms
+
+# class FetalHCDataset(Dataset):
+#     """
+#     Dataset avec support d'indices (pour split).
+#     Gère les masques:
+#       1) <image>.png -> <image>_mask.png
+#       2) 004_0000.png -> filled_004_gt_004.png (clé = 3 premiers chiffres)
+#       3) fallback: <image>_Annotation.png
+
+#     Augmentations synchronisées image/masque (sans Normalize sur le masque).
+
+#     NB: Filtre silencieusement les items au masque vide pour éviter division par zéro
+#         dans les métriques existantes, sans changer le reste du code.
+#     """
+#     def __init__(self, images_dir, masks_dir, transform=None, target_size=(256, 256), indices=None):
+#         self.images_dir = images_dir
+#         self.masks_dir = masks_dir
+#         self.transform = transform
+#         self.target_size = target_size
+
+#         # --- Liste d'images (on ignore *_Annotation et *_mask) ---
+#         all_files = sorted([
+#             f for f in os.listdir(images_dir)
+#             if f.endswith('.png') and '_Annotation' not in f and not f.endswith('_mask.png')
+#         ])
+
+#         if indices is not None:
+#             self.image_files = [all_files[i] for i in indices]
+#         else:
+#             self.image_files = all_files
+
+#         # --- Pré-indexation des masques ---
+#         self.mask_by_base = {}  # base -> fichier masque (pour *_mask.png / *_Annotation.png)
+#         self.mask_by_id3  = {}  # "004" -> fichier masque (pour filled_004_gt_004.png)
+
+#         for f in os.listdir(masks_dir):
+#             if not f.endswith('.png'):
+#                 continue
+
+#             if f.endswith('_mask.png'):
+#                 base = f[:-len('_mask.png')]
+#                 self.mask_by_base[base] = f
+#                 continue
+
+#             m = re.match(r'^filled_(\d{3})_gt_\1\.png$', f)
+#             if m:
+#                 id3 = m.group(1)
+#                 self.mask_by_id3[id3] = f
+#                 continue
+
+#             if f.endswith('_Annotation.png'):
+#                 base_anno = f[:-len('_Annotation.png')]
+#                 # Ne pas écraser un *_mask existant si déjà présent
+#                 self.mask_by_base.setdefault(base_anno, f)
+
+#         self._leading_id3_regex = re.compile(r'^(\d{3})')
+
+#         original = list(self.image_files)
+#         kept = []
+#         for fname in self.image_files:
+#             mfile = self._find_mask_file(fname)
+#             if mfile is None:
+#                 continue
+#             mpath = os.path.join(self.masks_dir, mfile)
+#             mask = cv2.imread(mpath, cv2.IMREAD_GRAYSCALE)
+#             if mask is None:
+#                 continue
+#             mask_resized = cv2.resize(mask, self.target_size).astype(np.float32) / 255.0
+#             # garde si au moins 1 pixel > 0
+#             if (mask_resized > 0).any():
+#                 kept.append(fname)
+
+#         if len(kept) == 0:
+#             # 🔁 Fallback: garder au moins tous les items qui ONT un fichier masque correspondant,
+#             # même si ce masque est vide → évite len(dataset)==0
+#             fallback = []
+#             for fname in original:
+#                 mfile = self._find_mask_file(fname)
+#                 if mfile is not None and os.path.exists(os.path.join(self.masks_dir, mfile)):
+#                     fallback.append(fname)
+#             # s'il n'y a vraiment aucun masque correspondant, on laisse tel quel (DataLoader se plaindra logiquement)
+#             self.image_files = fallback if len(fallback) > 0 else original
+#         else:
+#             self.image_files = kept
+
+#     def __len__(self):
+#         return len(self.image_files)
+
+#     def _find_mask_file(self, img_filename: str):
+#         """
+#         Essaie, dans l'ordre :
+#         1) <base>_mask.png (indexé) ou fichier réel s'il existe
+#         2) <base_sans_suffixe4>_mask.png (ex: retire _0000 à la fin)
+#         3) filled_<id3>_gt_<id3>.png où id3 est n'importe quel groupe de 3 chiffres dans le nom
+#         4) <base>_Annotation.png ou <base_sans_suffixe4>_Annotation.png
+#         """
+#         base = img_filename[:-4]  # sans ".png"
+
+#         # Variante sans suffixe slice "_0000" final éventuel
+#         import re, os
+#         base_wo_slice = re.sub(r'_\d{4}$', '', base)
+
+#         # 1) *_mask via index
+#         if base in self.mask_by_base:
+#             return self.mask_by_base[base]
+#         if base_wo_slice in self.mask_by_base:
+#             return self.mask_by_base[base_wo_slice]
+
+#         # 1bis) *_mask en test direct si pas indexé (robuste)
+#         cand = base + "_mask.png"
+#         if os.path.exists(os.path.join(self.masks_dir, cand)):
+#             return cand
+#         cand = base_wo_slice + "_mask.png"
+#         if os.path.exists(os.path.join(self.masks_dir, cand)):
+#             return cand
+
+#         # 2) filled_###_gt_### via n'importe quel groupe de 3 chiffres dans le nom
+#         m_any = re.search(r'(\d{3})', base)
+#         if m_any:
+#             id3 = m_any.group(1)
+#             # d'abord via index si disponible
+#             if id3 in self.mask_by_id3:
+#                 return self.mask_by_id3[id3]
+#             # sinon test direct d'existence
+#             cand = f"filled_{id3}_gt_{id3}.png"
+#             if os.path.exists(os.path.join(self.masks_dir, cand)):
+#                 return cand
+
+#         # 3) *_Annotation (fallback), version avec et sans suffixe slice
+#         cand = base + "_Annotation.png"
+#         if os.path.exists(os.path.join(self.masks_dir, cand)):
+#             return cand
+#         cand = base_wo_slice + "_Annotation.png"
+#         if os.path.exists(os.path.join(self.masks_dir, cand)):
+#             return cand
+
+#         return None
+
+
+#     def __getitem__(self, idx):
+#         img_filename = self.image_files[idx]
+#         img_path = os.path.join(self.images_dir, img_filename)
+
+#         mask_filename = self._find_mask_file(img_filename)
+#         if mask_filename is None:
+#             raise FileNotFoundError(
+#                 f"Aucun masque correspondant trouvé pour {img_filename}. "
+#                 f"Attendu *_mask.png ou filled_###_gt_###.png (ou *_Annotation.png)."
+#             )
+#         mask_path = os.path.join(self.masks_dir, mask_filename)
+
+#         # --- Chargement ---
+#         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+#         if image is None:
+#             raise FileNotFoundError(f"Image introuvable: {img_path}")
+
+#         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+#         if mask is None:
+#             raise FileNotFoundError(f"Masque introuvable: {mask_path}")
+
+#         # --- Resize + normalisation [0,1] ---
+#         image = cv2.resize(image, self.target_size).astype(np.float32) / 255.0
+#         mask  = cv2.resize(mask,  self.target_size).astype(np.float32) / 255.0
+
+#         image = torch.from_numpy(image).float().unsqueeze(0)  # [1,H,W]
+#         mask  = torch.from_numpy(mask).float().unsqueeze(0)   # [1,H,W]
+
+#         # --- Transformations synchronisées ---
+#         if self.transform:
+#             seed = random.randint(0, 2**32 - 1)
+#             random.seed(seed); torch.manual_seed(seed)
+#             image = self.transform(image)
+
+#             random.seed(seed); torch.manual_seed(seed)
+#             mask_transform = transforms.Compose([
+#                 t for t in self.transform.transforms
+#                 if not isinstance(t, transforms.Normalize)
+#             ])
+#             mask = mask_transform(mask)
+
+#         return image, mask
 
 def get_train_transforms():
     return transforms.Compose([
@@ -138,6 +325,8 @@ def get_train_transforms():
         transforms.RandomVerticalFlip(0.2),
         transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1), shear=5),
     ])
+
+
 
 
 class BCEDiceLoss(nn.Module):
@@ -287,6 +476,40 @@ def evaluate(model, loader, criterion, device):
         return float('nan'), float('nan')
     return total_loss / n_batches, total_dice / n_batches
 
+# === VISUALISATION DE PRÉDICTIONS ===
+def visualize_predictions(model, dataset, device, num_samples=4, save_path='sample_predictions.png'):
+    import numpy as np
+    model.eval()
+    n = len(dataset)
+    if n == 0:
+        print("⚠️ visualize_predictions: dataset vide, rien à afficher.")
+        return
+    num_samples = min(num_samples, n)
+    indices = np.random.choice(n, num_samples, replace=False)
+    fig, axes = plt.subplots(3, num_samples, figsize=(16, 12))
+    with torch.no_grad():
+        for i, idx in enumerate(indices):
+            image, mask = dataset[idx]
+            image_input = image.unsqueeze(0).to(device)
+            pred = model(image_input).cpu().squeeze().numpy()
+            image_np = image.squeeze().cpu().numpy()
+            mask_np = mask.squeeze().cpu().numpy()
+            pred_sigmoid = torch.sigmoid(torch.from_numpy(pred)).numpy()
+            axes[0, i].imshow(image_np, cmap='gray')
+            axes[0, i].set_title(f'Original Image {i+1}')
+            axes[0, i].axis('off')
+            axes[1, i].imshow(mask_np, cmap='gray')
+            axes[1, i].set_title(f'Ground Truth {i+1}')
+            axes[1, i].axis('off')
+            axes[2, i].imshow(pred_sigmoid, cmap='gray')
+            axes[2, i].set_title(f'Prediction {i+1}')
+            axes[2, i].axis('off')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+    print(f"🖼️  Sample predictions saved to {save_path}")
+    model.train()
+
 
 def make_loader(client_dir, indices, transform, batch_size, shuffle, drop_last):
     ds = FetalHCDataset(
@@ -298,6 +521,30 @@ def make_loader(client_dir, indices, transform, batch_size, shuffle, drop_last):
     )
     loader = DataLoader(ds, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
     return ds, loader
+# def make_loader(client_dir, indices, transform, batch_size, shuffle, drop_last):
+#     images_dir = os.path.join(client_dir, "imagesTr")
+#     masks_dir  = os.path.join(client_dir, "labelsTr")
+
+#     ds = FetalHCDataset(images_dir, masks_dir, transform=transform, target_size=(256,256), indices=indices)
+
+#     # --- GARDE-FOU 1 : si le split est vide, on évite de créer un DataLoader vide
+#     if len(ds) == 0:
+#         raise RuntimeError(f"[make_loader] Dataset vide pour {client_dir} avec indices={len(indices)}")
+
+#     # --- GARDE-FOU 2 : garantir au moins 1 batch, même si batch_size > len(ds)
+#     eff_bs = min(batch_size, len(ds))
+#     if eff_bs <= 0:
+#         eff_bs = 1
+
+#     # Avec Opacus, drop_last est ignoré de toute façon; gardons False pour éviter les surprises
+#     loader = DataLoader(ds, batch_size=eff_bs, shuffle=(shuffle and len(ds) > 1), drop_last=False)
+
+#     # --- GARDE-FOU 3 : Opacus fait 1/len(loader); assurons-nous d'avoir >= 1
+#     if len(loader) == 0:
+#         # rebuild au pire avec bs=1
+#         loader = DataLoader(ds, batch_size=1, shuffle=False, drop_last=False)
+
+#     return ds, loader
 
 def train_one_client(client_dir, global_state_dict, cumulative_engine):
     model = UNet()
@@ -484,19 +731,13 @@ for rnd in range(1, NUM_ROUNDS + 1):
               ", ".join(f"{t:.2f}" for t in g_val_thrs))
 
         # --- Early stop sur la métrique choisie (tuned ou standard) ---
+        # --- Suivi du "meilleur" modèle (sans early stopping) ---
         metric_for_es = mean_global_val_dice_tuned if USE_TUNED_FOR_EARLYSTOP else mean_global_val_dice
-        if not np.isnan(metric_for_es):
-            if metric_for_es > best_global_val_dice + 1e-6:
-                best_global_val_dice = metric_for_es
-                best_global_state = {k: v.clone().cpu() for k, v in global_state.items()}
-                best_round = rnd
-                no_improve = 0
-            else:
-                no_improve += 1
+        if not np.isnan(metric_for_es) and metric_for_es > best_global_val_dice + 1e-6:
+            best_global_val_dice = metric_for_es
+            best_global_state = {k: v.clone().cpu() for k, v in global_state.items()}
+            best_round = rnd
 
-        if no_improve >= EARLY_STOP_PATIENCE:
-            print(f"⏹ Early stop au round {rnd} (meilleur round={best_round}, Global Val Dice*={best_global_val_dice:.4f})")
-            break
 
 end_time = time.time()
 elapsed_time = end_time - start_time
@@ -505,7 +746,7 @@ print(f"\n=== Entraînement terminé en {int(minutes)} min {int(seconds)} sec ==
 
 # Sauvegarde du meilleur modèle global (selon métrique choisie)
 if best_global_state is not None:
-    torch.save(best_global_state, "best_global_state.pth")
+    torch.save(best_global_state, "best_global_state_multicenter.pth")
     print(f"💾 Best GLOBAL sauvegardé: round={best_round} | Global Val Dice*={best_global_val_dice:.4f} -> best_global_state.pth")
 
 # === Dice final (moyenne des 3 clients, dernier round, train/val standard) ===
@@ -517,7 +758,7 @@ print(f"   - Val   Dice : {final_val_dice:.4f}")
 
 # === TEST FINAL : évalue le 'dernier' global ET le 'best_global_state' (utile pour TFE) ===
 def eval_on_test(global_state_dict, label):
-    test_losses, test_dices = [], []
+    test_losses, test_dices, test_accs = [], [], []
     criterion = BCEDiceLoss()
     with torch.no_grad():
         test_model = UNet().to(device)
@@ -536,10 +777,35 @@ def eval_on_test(global_state_dict, label):
                 indices=test_idx
             )
             test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
-            t_loss, t_dice = evaluate(test_model, test_loader, criterion, device)
-            test_losses.append(t_loss); test_dices.append(t_dice)
-            print(f"[TEST {label}] {cid}: Loss={t_loss:.4f} | Dice={t_dice:.4f} | n_test={len(test_ds)}")
-    print(f"🧪 [{label}] Moyenne Test Loss: {float(np.nanmean(test_losses)):.4f} | Moyenne Test Dice: {float(np.nanmean(test_dices)):.4f}")
+            
+            total_loss, total_dice, total_acc, n_batches = 0.0, 0.0, 0.0, 0
+            for imgs, masks in test_loader:
+                imgs, masks = imgs.to(device), masks.to(device)
+                masks_bin = (masks > 0.5).float()
+                logits = test_model(imgs)
+                loss = criterion(logits, masks_bin)
+                probs = torch.sigmoid(logits)
+                total_loss += loss.item()
+                total_dice += dice_score(probs, masks_bin).item()
+                total_acc  += pixel_accuracy(probs, masks_bin).item()
+                n_batches += 1
+            
+            if n_batches > 0:
+                avg_loss = total_loss / n_batches
+                avg_dice = total_dice / n_batches
+                avg_acc  = total_acc / n_batches
+            else:
+                avg_loss, avg_dice, avg_acc = float('nan'), float('nan'), float('nan')
+
+            test_losses.append(avg_loss)
+            test_dices.append(avg_dice)
+            test_accs.append(avg_acc)
+
+            print(f"[TEST {label}] {cid}: Loss={avg_loss:.4f} | Dice={avg_dice:.4f} | Acc={avg_acc:.4f} | n_test={len(test_ds)}")
+
+    print(f"🧪 [{label}] Moyenne Test Loss: {float(np.nanmean(test_losses)):.4f} | "
+          f"Moyenne Test Dice: {float(np.nanmean(test_dices)):.4f} | "
+          f"Moyenne Test Acc: {float(np.nanmean(test_accs)):.4f}")
 
 # Dernier global
 eval_on_test(global_state, "last")
@@ -569,7 +835,7 @@ lines_1, labels_1 = ax1.get_legend_handles_labels()
 lines_2, labels_2 = ax2.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper center", ncol=3)
 plt.tight_layout()
-plt.savefig(f"metrics_combined_noise_{NOISE_MULTIPLIER}.png")
+plt.savefig(f"metrics_combined_noise_{NOISE_MULTIPLIER}_multicenter.png")
 plt.close()
 
 # === Courbes par client ===
@@ -588,10 +854,52 @@ def plot_per_client(metric_dict, title, ylabel, outfile):
     plt.savefig(outfile)
     plt.close()
 
-plot_per_client(client_train_dice, f"Train Dice par client vs Rounds (noise={NOISE_MULTIPLIER})", "Dice", f"per_client_train_dice_{NOISE_MULTIPLIER}.png")
-plot_per_client(client_train_loss, f"Train Loss par client vs Rounds (noise={NOISE_MULTIPLIER})", "Loss", f"per_client_train_loss_{NOISE_MULTIPLIER}.png")
-plot_per_client(client_val_dice,  f"Val Dice par client vs Rounds (noise={NOISE_MULTIPLIER})",   "Dice", f"per_client_val_dice_{NOISE_MULTIPLIER}.png")
-plot_per_client(client_val_loss,  f"Val Loss par client vs Rounds (noise={NOISE_MULTIPLIER})",   "Loss", f"per_client_val_loss_{NOISE_MULTIPLIER}.png")
+plot_per_client(client_train_dice, f"Train Dice par client vs Rounds (noise={NOISE_MULTIPLIER}) multicenter", "Dice", f"per_client_train_dice_{NOISE_MULTIPLIER}_multicenter.png")
+plot_per_client(client_train_loss, f"Train Loss par client vs Rounds (noise={NOISE_MULTIPLIER}) multicenter", "Loss", f"per_client_train_loss_{NOISE_MULTIPLIER}_multicenter.png")
+plot_per_client(client_val_dice,  f"Val Dice par client vs Rounds (noise={NOISE_MULTIPLIER}) multicenter",   "Dice", f"per_client_val_dice_{NOISE_MULTIPLIER}_multicenter.png")
+plot_per_client(client_val_loss,  f"Val Loss par client vs Rounds (noise={NOISE_MULTIPLIER}) multicenter",   "Loss", f"per_client_val_loss_{NOISE_MULTIPLIER}_multicenter.png")
 
 print("\n✅ Graphe global + graphes par client générés.")
 print("✅ Éval 'tuned' (seuil + TTA + postproc) activée pour la validation.")
+
+# === VISUALISATION FINALE DE PRÉDICTIONS (après le dernier round) ===
+def _build_viz_dataset_from_splits(use_test=True):
+    """Concatène les datasets (test si dispo, sinon val) de chaque client pour la visualisation."""
+    subsets = []
+    for client_dir in CLIENT_DIRS:
+        cid = os.path.basename(client_dir.rstrip("/"))
+        if cid not in client_splits:
+            continue
+        train_idx, val_idx, test_idx = client_splits[cid]
+        idx = test_idx if (use_test and len(test_idx) > 0) else val_idx
+        if len(idx) == 0:
+            continue
+        ds = FetalHCDataset(
+            images_dir=os.path.join(client_dir, "imagesTr"),
+            masks_dir=os.path.join(client_dir, "labelsTr"),
+            transform=None,
+            target_size=TARGET_SIZE,
+            indices=idx
+        )
+        subsets.append(ds)
+    if len(subsets) == 0 and use_test:
+        # fallback: retente avec val si aucun test
+        return _build_viz_dataset_from_splits(use_test=False)
+    if len(subsets) == 0:
+        return None
+    return subsets[0] if len(subsets) == 1 else ConcatDataset(subsets)
+
+viz_state = best_global_state if best_global_state is not None else global_state
+viz_model = UNet().to(device)
+if not ModuleValidator.is_valid(viz_model):
+    viz_model = ModuleValidator.fix(viz_model)
+viz_model.load_state_dict(viz_state, strict=True)
+viz_model.eval()
+
+viz_dataset = _build_viz_dataset_from_splits(use_test=True)
+if viz_dataset is not None:
+    num_samples = 4  # ajuste si tu veux
+    save_path = f"sample_predictions_noise_{NOISE_MULTIPLIER}_multicenter.png"
+    visualize_predictions(viz_model, viz_dataset, device, num_samples=num_samples, save_path=save_path)
+else:
+    print("⚠️ Aucun dataset (test/val) disponible pour la visualisation de prédictions.")
